@@ -1,0 +1,99 @@
+services:
+  connect:
+    image: connect
+    build:
+      context: .
+      dockerfile: connect-kafka-mongodb-api\Dockerfile
+    ports:
+      - '8090:8090'
+      - '8091:8091'
+    depends_on:
+      - kafka
+  
+  postgres:
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=commerce
+    ports:
+      - "5432:5432"
+    command: ["postgres", "-c", "wal_level=logical"] ## necessary to tell debezium how to connect to the pg instance and listen to the changes in the write ahead log
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - '2181:2181'
+
+  kafka:
+   image: confluentinc/cp-kafka
+   container_name: kafka
+   depends_on:
+      - zookeeper
+   environment: 
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181      
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+   links:
+      - zookeeper
+   ports:
+      - '9092:9092'
+        
+  debezium:
+    image: debezium/server:2.7.0.Final
+    container_name: Debezium
+    depends_on:
+      - postgres
+      - zookeeper
+      - kafka
+    environment:
+      # Debezium configuration
+      - DEBEZIUM_SERVER_NAME=debezium-server
+      - DEBEZIUM_SOURCE_OFFSET_STORAGE_FILE_FILENAME=/debezium/data/offsets.dat
+      - DEBEZIUM_SOURCE_OFFSET_FLUSH_INTERVAL_MS=60000
+      - DEBEZIUM_SOURCE_TOMBSTONES_ON_DELETE=false
+      - QUARKUS_LOG_CONSOLE_JSON=false
+      
+      # PostgreSQL source configuration
+      - DEBEZIUM_SOURCE_CONNECTOR_CLASS=io.debezium.connector.postgresql.PostgresConnector
+      - DEBEZIUM_SOURCE_PLUGIN_NAME=pgoutput # reading the postgres logs from here
+      - DEBEZIUM_SOURCE_DATABASE_HOSTNAME=postgres
+      - DEBEZIUM_SOURCE_DATABASE_PORT=5432
+      - DEBEZIUM_SOURCE_DATABASE_USER=postgres
+      - DEBEZIUM_SOURCE_DATABASE_PASSWORD=postgres
+      - DEBEZIUM_SOURCE_DATABASE_DBNAME=commerce
+      - DEBEZIUM_SOURCE_SCHEMA_INCLUDE_LIST=public
+      - DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST=public.Products
+      - DEBEZIUM_SOURCE_TOPIC_PREFIX=commerce
+
+      # Kafka sink configuration - also add the config for kafka + zookeeper
+      - DEBEZIUM_SINK_TYPE=kafka
+      - DEBEZIUM_SINK_KAFKA_PRODUCER_BOOTSTRAP_SERVERS=kafka:9092
+      - DEBEZIUM_SINK_KAFKA_PRODUCER_KEY_SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
+      - DEBEZIUM_SINK_KAFKA_PRODUCER_VALUE_SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
+
+  mongodb:
+    image: mongo  
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongouser
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+      MONGO_INITDB_DATABASE: commerce
+
+  mongo-express:
+    image: ${DOCKER_REGISTRY-}mongo-express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: mongouser
+      ME_CONFIG_MONGODB_ADMINPASSWORD: mongopass
+      ME_CONFIG_MONGODB_URL: mongodb://mongouser:mongopass@query_db:27017/
+      ME_CONFIG_BASICAUTH: false
