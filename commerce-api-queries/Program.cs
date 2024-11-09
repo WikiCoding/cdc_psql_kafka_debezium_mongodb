@@ -18,19 +18,13 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    
-    using var scope = app.Services.CreateScope();
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    dbContext.Database.EnsureDeleted();
-    dbContext.Database.EnsureCreated();
 }
 
 app.UseHttpsRedirection();
 
-app.MapGet("/products", () =>
+app.MapGet("/products", async (AppDbContext context) =>
     {
-        return "";
+        return Results.Ok(await context.Products.ToListAsync());
     })
 .WithName("GetWeatherForecast")
 .WithOpenApi();

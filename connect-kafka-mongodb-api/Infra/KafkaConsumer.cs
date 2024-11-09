@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Confluent.Kafka;
 using connect_kafka_mongodb_api.Repository;
+using MongoDB.Bson.IO;
 
 namespace connect_kafka_mongodb_api.Infra;
 
@@ -50,15 +52,24 @@ public class KafkaConsumer : BackgroundService
             if (consumeResult is null) { return; }
 
             var message = consumeResult.Message.Value;
+            
+            var dbzMsg = JsonSerializer.Deserialize<DebeziumMessage>(message);
 
             _logger.LogWarning("Received message {message}", message);
+            
+            if (dbzMsg == null) return;
+            _logger.LogWarning("Received deserialized message {message}", dbzMsg.payload.after.ProductDescription);
 
-            using (var scope = _serviceProvider.CreateScope())
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetService<AppDbContext>();
+
+            var product = new Product
             {
-                var dbContext = scope.ServiceProvider.GetService<AppDbContext>();
-
-                // dbContext.Add();
-                // await dbContext.SaveChangesAsync(stoppingToken);
-            }
+                Id = new Guid(dbzMsg.payload.after.Id), 
+                ProductDescription = dbzMsg.payload.after.ProductDescription
+            };
+                
+            dbContext!.Add(product);
+            await dbContext.SaveChangesAsync(stoppingToken);
         }
 }

@@ -1,47 +1,46 @@
 services:
-  connect:
-    image: connect
-    build:
-      context: .
-      dockerfile: connect-kafka-mongodb-api\Dockerfile
-    ports:
-      - '8090:8090'
-      - '8091:8091'
-    depends_on:
-      - kafka
-  
-  postgres:
-    image: postgres:latest
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=commerce
-    ports:
-      - "5432:5432"
-    command: ["postgres", "-c", "wal_level=logical"] ## necessary to tell debezium how to connect to the pg instance and listen to the changes in the write ahead log
-  
   zookeeper:
-    image: confluentinc/cp-zookeeper
+    image: confluentinc/cp-zookeeper:latest
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - '2181:2181'
+      - "2181:2181"
+    networks:
+      - app-network
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:latest
+    hostname: schema-registry
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
+      SCHEMA_REGISTRY_LISTENERS: http://schema-registry:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://localhost:19092
+      SCHEMA_REGISTRY_DEBUG: 'true'
+    networks:
+      - app-network
 
   kafka:
-   image: confluentinc/cp-kafka
-   container_name: kafka
-   depends_on:
+    image: confluentinc/cp-kafka:latest
+    hostname: kafka-broker-1
+    ports:
+      - "19092:19092"
+    depends_on:
       - zookeeper
-   environment: 
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181      
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://localhost:19092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-   links:
-      - zookeeper
-   ports:
-      - '9092:9092'
+    networks:
+      - app-network
         
   debezium:
     image: debezium/server:2.7.0.Final
@@ -75,6 +74,20 @@ services:
       - DEBEZIUM_SINK_KAFKA_PRODUCER_BOOTSTRAP_SERVERS=kafka:9092
       - DEBEZIUM_SINK_KAFKA_PRODUCER_KEY_SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
       - DEBEZIUM_SINK_KAFKA_PRODUCER_VALUE_SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
+    networks:
+      - app-network
+        
+  postgres:
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=commerce
+    ports:
+      - "5432:5432"
+    command: [ "postgres", "-c", "wal_level=logical" ] ## necessary to tell debezium how to connect to the pg instance and listen to the changes in the write ahead log
+    networks:
+      - app-network
 
   mongodb:
     image: mongo  
@@ -86,14 +99,22 @@ services:
       MONGO_INITDB_ROOT_USERNAME: mongouser
       MONGO_INITDB_ROOT_PASSWORD: mongopass
       MONGO_INITDB_DATABASE: commerce
+    networks:
+      - app-network
 
   mongo-express:
     image: ${DOCKER_REGISTRY-}mongo-express
     restart: always
     ports:
-      - "8081:8081"
+      - "8085:8085"
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: mongouser
       ME_CONFIG_MONGODB_ADMINPASSWORD: mongopass
-      ME_CONFIG_MONGODB_URL: mongodb://mongouser:mongopass@query_db:27017/
+      ME_CONFIG_MONGODB_URL: mongodb://mongouser:mongopass@commerce:27017/
       ME_CONFIG_BASICAUTH: false
+    networks:
+      - app-network
+        
+networks:
+  app-network:
+    driver: bridge
