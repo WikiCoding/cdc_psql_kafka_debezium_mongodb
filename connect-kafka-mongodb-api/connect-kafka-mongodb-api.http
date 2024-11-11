@@ -1,6 +1,0 @@
-@connect_kafka_mongodb_api_HostAddress = http://localhost:5179
-
-GET {{connect_kafka_mongodb_api_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

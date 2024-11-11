@@ -4,6 +4,6 @@ namespace commerce_api_commands.Domain;
 
 public class Product
 {
-    [Key] public Guid Id { get; set; } = new Guid();
-    public string ProductDescription { get; set; } = string.Empty;
+    [Key] public int id { get; set; }
+    public string product_name { get; set; } = string.Empty;
 }

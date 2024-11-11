@@ -5,5 +5,5 @@ namespace commerce_api_commands.Repository;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    public DbSet<Product> Products { get; set; }
+    public DbSet<Product> products { get; set; }
 }
