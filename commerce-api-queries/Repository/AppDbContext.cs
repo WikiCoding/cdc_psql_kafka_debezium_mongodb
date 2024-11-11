@@ -12,6 +12,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         base.OnModelCreating(modelBuilder);
         
-        modelBuilder.Entity<Product>().ToCollection("Products");
+        modelBuilder.Entity<Product>().ToCollection("products");
     }
 }

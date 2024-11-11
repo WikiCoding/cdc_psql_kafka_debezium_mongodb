@@ -1,81 +1,52 @@
 services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-    networks:
-      - app-network
-
-  schema-registry:
-    image: confluentinc/cp-schema-registry:latest
-    hostname: schema-registry
-    depends_on:
-      - kafka
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
-      SCHEMA_REGISTRY_LISTENERS: http://schema-registry:8081
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://localhost:19092
-      SCHEMA_REGISTRY_DEBUG: 'true'
-    networks:
-      - app-network
 
   kafka:
-    image: confluentinc/cp-kafka:latest
-    hostname: kafka-broker-1
-    ports:
-      - "19092:19092"
+    image: confluentinc/cp-kafka
+    container_name: kafka
     depends_on:
       - zookeeper
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://localhost:19092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    networks:
-      - app-network
+    ports:
+      - "9092:9092"
         
-  debezium:
-    image: debezium/server:2.7.0.Final
-    container_name: Debezium
-    depends_on:
-      - postgres
-      - zookeeper
-      - kafka
+  kafka-connect:
+    image: 'confluentinc/cp-kafka-connect:latest'
     environment:
-      # Debezium configuration
-      - DEBEZIUM_SERVER_NAME=debezium-server
-      - DEBEZIUM_SOURCE_OFFSET_STORAGE_FILE_FILENAME=/debezium/data/offsets.dat
-      - DEBEZIUM_SOURCE_OFFSET_FLUSH_INTERVAL_MS=60000
-      - DEBEZIUM_SOURCE_TOMBSTONES_ON_DELETE=false
-      - QUARKUS_LOG_CONSOLE_JSON=false
-      
-      # PostgreSQL source configuration
-      - DEBEZIUM_SOURCE_CONNECTOR_CLASS=io.debezium.connector.postgresql.PostgresConnector
-      - DEBEZIUM_SOURCE_PLUGIN_NAME=pgoutput # reading the postgres logs from here
-      - DEBEZIUM_SOURCE_DATABASE_HOSTNAME=postgres
-      - DEBEZIUM_SOURCE_DATABASE_PORT=5432
-      - DEBEZIUM_SOURCE_DATABASE_USER=postgres
-      - DEBEZIUM_SOURCE_DATABASE_PASSWORD=postgres
-      - DEBEZIUM_SOURCE_DATABASE_DBNAME=commerce
-      - DEBEZIUM_SOURCE_SCHEMA_INCLUDE_LIST=public
-      - DEBEZIUM_SOURCE_TABLE_INCLUDE_LIST=public.Products
-      - DEBEZIUM_SOURCE_TOPIC_PREFIX=commerce
-
-      # Kafka sink configuration - also add the config for kafka + zookeeper
-      - DEBEZIUM_SINK_TYPE=kafka
-      - DEBEZIUM_SINK_KAFKA_PRODUCER_BOOTSTRAP_SERVERS=kafka:9092
-      - DEBEZIUM_SINK_KAFKA_PRODUCER_KEY_SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
-      - DEBEZIUM_SINK_KAFKA_PRODUCER_VALUE_SERIALIZER=org.apache.kafka.common.serialization.StringSerializer
-    networks:
-      - app-network
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:9092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: 'kafka-connect'
+      CONNECT_GROUP_ID: 'kafka-connect'
+      CONNECT_CONFIG_STORAGE_TOPIC: '_connect_configs_sink'
+      CONNECT_OFFSET_STORAGE_TOPIC: '_connect_offsets_sink'
+      CONNECT_STATUS_STORAGE_TOPIC: '_connect_status_sink'
+      CONNECT_KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_INTERNAL_KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_INTERNAL_VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_REST_PORT: 8083
+      CONNECT_PLUGIN_PATH: '/usr/share/java'
+      CONNECT_SECURITY_PROTOCOL: 'PLAINTEXT'
+      CONNECT_CONFLUENT_SUPPORT_METRICS_ENABLE: 'false'
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+    ports:
+      - '8083:8083'
+    depends_on:
+      - kafka
+    volumes: # Adding the plugins to Kafka-Connect
+      - ./kafka-connect-plugins/mongo-sink:/usr/share/java/mongo-sink
+      - ./kafka-connect-plugins/debezium-postgres-source:/usr/share/java/psql-source
         
   postgres:
     image: postgres:latest
@@ -86,8 +57,6 @@ services:
     ports:
       - "5432:5432"
     command: [ "postgres", "-c", "wal_level=logical" ] ## necessary to tell debezium how to connect to the pg instance and listen to the changes in the write ahead log
-    networks:
-      - app-network
 
   mongodb:
     image: mongo  
@@ -99,22 +68,3 @@ services:
       MONGO_INITDB_ROOT_USERNAME: mongouser
       MONGO_INITDB_ROOT_PASSWORD: mongopass
       MONGO_INITDB_DATABASE: commerce
-    networks:
-      - app-network
-
-  mongo-express:
-    image: ${DOCKER_REGISTRY-}mongo-express
-    restart: always
-    ports:
-      - "8085:8085"
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: mongouser
-      ME_CONFIG_MONGODB_ADMINPASSWORD: mongopass
-      ME_CONFIG_MONGODB_URL: mongodb://mongouser:mongopass@commerce:27017/
-      ME_CONFIG_BASICAUTH: false
-    networks:
-      - app-network
-        
-networks:
-  app-network:
-    driver: bridge
